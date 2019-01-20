@@ -101,7 +101,7 @@ export default class HomeScreen extends React.Component {
 
    async onPress()
   {
-    axios.post("http:///myip:3978/api/messages", this.state.text)
+    axios.post("http:///localhost:3978/api/messages", this.state.text)
     .then(res => console.log(res))
     .catch(err => console.log(err))
 
@@ -117,7 +117,6 @@ export default class HomeScreen extends React.Component {
           interruptionModeAndroid : Expo.Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
           playThroughEarpieceAndroid : true
         });
-
 
 
         const record = new Expo.Audio.Recording();
