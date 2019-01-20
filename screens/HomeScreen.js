@@ -14,6 +14,7 @@ import {
   Icon
 } from 'react-native';
 import { WebBrowser } from 'expo';
+import axios from 'axios';import SocketIOClient from 'socket.io-client';
 
 import { MonoText } from '../components/StyledText';
 
@@ -23,14 +24,33 @@ export default class HomeScreen extends React.Component {
     super(props);
     this.state = ({
       rec : false,
-      text : ''
+      text : '',
     });
+
+    this.socket = SocketIOClient('http://localhost:3000');
+
     this.onPress = this.onPress.bind(this);
   }
+/*
+  componenentDidMount()
+  {
+    const socket = new WebSocket('ws://localhost:8080');
+
+    // Connection opened
+    socket.addEventListener('open', function (event) {
+        socket.send('Hello Server!');
+    });
+
+    // Listen for messages
+    socket.addEventListener('message', function (event) {
+        console.log('Message from server ', event.data);
+    });
+  }*/
 
   static navigationOptions = {
     header: null,
   };
+
   render() {
     return (
       <View style = {styles.Container}>
@@ -38,6 +58,7 @@ export default class HomeScreen extends React.Component {
           style={styles.actualtext}
           onChangeText={(text) => this.setState({text})}
           placeholder= "How are you feeling today?"
+          multiline = {true}
         />
 
         <TouchableHighlight style = {styles.VoiceButton} onPress = {this.onPress}>
@@ -105,46 +126,54 @@ export default class HomeScreen extends React.Component {
     .then(res => console.log(res))
     .catch(err => console.log(err))
 
-      const { Permissions } = Expo;
-      const { status } = await Permissions.askAsync(Permissions.AUDIO_RECORDING);
-      if (status === 'granted')
+    this.socket.emit('text', this.state.text);
+    this.socket.on('response'); 
+    const { Permissions } = Expo;
+    const { status } = await Permissions.askAsync(Permissions.AUDIO_RECORDING);
+    if (status === 'granted')
+    {
+      Expo.Audio.setAudioModeAsync({
+        playsInSilentModeIOS : false,
+        allowsRecordingIOS: false,
+        interruptionModeIOS : Expo.Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX,
+        shouldDuckAndroid : true,
+        interruptionModeAndroid : Expo.Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
+        playThroughEarpieceAndroid : true
+      });
+
+      this.socket.emit('message', this.state.text);
+
+
+      const record = new Expo.Audio.Recording();
+      if(this.state.rec === false)
       {
-        Expo.Audio.setAudioModeAsync({
-          playsInSilentModeIOS : false,
-          allowsRecordingIOS: false,
-          interruptionModeIOS : Expo.Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX,
-          shouldDuckAndroid : true,
-          interruptionModeAndroid : Expo.Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
-          playThroughEarpieceAndroid : true
-        });
 
+        try {
+          await record.prepareToRecordAsync(Expo.Audio.RECORDING_OPTIONS_PRESET_HIGH_QUALITY);
+          await record.startAsync();
 
-        const record = new Expo.Audio.Recording();
-        if(this.state.rec === false)
-        {
-
-          try {
-            await record.prepareToRecordAsync(Expo.Audio.RECORDING_OPTIONS_PRESET_HIGH_QUALITY);
-            await record.startAsync();
-
-          }
-           catch (e) {
-            console.log(e);
-          }
         }
-        else {
-
-          try {
-            await record.stopAndUnloadAsync();
-          } catch (e) {
-            console.log(e);
-          } finally {
-            record.setOnRecordingStatusUpdate(null);
-          }
-
-          var fileurl = record.getURI();
-          play(fileurl);
+         catch (e) {
+          console.log(e);
         }
+      }
+      else {
+        try {
+          await record.stopAndUnloadAsync();
+        } catch (e) {
+          console.log(e);
+        } finally {
+          record.setOnRecordingStatusUpdate(null);
+        }
+
+        var fileurl = record.getURI();
+        try {
+           const { sound: soundObject, status } = await Expo.Audio.Sound.createAsync((fileurl), { shouldPlay : true});
+           await sound.playAsync();
+        } catch (e) {
+          console.log(e);
+        }
+      }
     }
     else {
       console.log("Didn't have permission")
@@ -153,17 +182,6 @@ export default class HomeScreen extends React.Component {
       rec: !prevState.rec
     }));
 
-  }
-
-  async play(fileurl)
-  {
-    try {
-       const { sound: soundObject, status } = await Expo.Audio.Sound.createAsync((fileurl), { shouldPlay : true});
-    } catch (e) {
-      console.log(e);
-    } finally {
-
-    }
   }
 }
 
