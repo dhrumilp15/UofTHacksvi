@@ -13,8 +13,7 @@ import {
   Alert,
   Icon
 } from 'react-native';
-import { WebBrowser } from 'expo';
-import axios from 'axios';import SocketIOClient from 'socket.io-client';
+import Expo, { Audio, FileSystem, WebBrowser } from 'expo';
 
 import { MonoText } from '../components/StyledText';
 
@@ -22,30 +21,25 @@ export default class HomeScreen extends React.Component {
   constructor(props)
   {
     super(props);
+    this.recording = null;
+    this.sound = null;
     this.state = ({
-      rec : false,
+      permission: false,
+      isrec : false,
+      isloading : false,
       text : '',
     });
-
-    this.socket = SocketIOClient('http://localhost:3000');
-
-    this.onPress = this.onPress.bind(this);
   }
-/*
+
   componenentDidMount()
   {
-    const socket = new WebSocket('ws://localhost:8080');
-
-    // Connection opened
-    socket.addEventListener('open', function (event) {
-        socket.send('Hello Server!');
-    });
-
-    // Listen for messages
-    socket.addEventListener('message', function (event) {
-        console.log('Message from server ', event.data);
-    });
-  }*/
+    async () => {
+      const response = await Permissions.askAsync(Permissions.AUDIO_RECORDING);
+      this.setState({
+        permission : response.status === 'granted',
+      })
+    }
+  }
 
   static navigationOptions = {
     header: null,
@@ -61,54 +55,14 @@ export default class HomeScreen extends React.Component {
           multiline = {true}
         />
 
-        <TouchableHighlight style = {styles.VoiceButton} onPress = {this.onPress}>
-        <Image
+        <TouchableHighlight style = {styles.VoiceButton} onPress = {this._onPress}>
+        <Image  
           style = {styles.button}
           source={require('../assets/images/mic.png')}/>
         </TouchableHighlight>
       </View>
     );
   };
-
-/*
-<View style={styles.container}>
-  <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-=         <View style={styles.welcomeContainer}>
-      <Image
-        source={
-          __DEV__ ? require('../assets/images/robot-dev.png') : require('../assets/images/robot-prod.png')
-        }
-        style={styles.welcomeImage}
-      />
-    </View>
-
-    <View style = {styles.getStartedContainer}>
-      <Text style = {styles.getStartedText}>Press the button when you're ready to speak.</Text>
-    </View>
-    <View style = {styles.Voicebutton}>
-      <TouchableHighlight onPress={this._onPressButton}>*/
-  _maybeRenderDevelopmentModeWarning() {
-    if (__DEV__) {
-      const learnMoreButton = (
-        <Text onPress={this._handleLearnMorePress} style={styles.helpLinkText}>
-          Learn more
-        </Text>
-      );
-
-      return (
-        <Text style={styles.developmentModeText}>
-          Development mode is enabled, your app will be slower but you can use useful development
-          tools. {learnMoreButton}
-        </Text>
-      );
-    } else {
-      return (
-        <Text style={styles.developmentModeText}>
-          You are not in development mode, your app will run at full speed.
-        </Text>
-      );
-    }
-  }
 
   _handleLearnMorePress = () => {
     WebBrowser.openBrowserAsync('https://docs.expo.io/versions/latest/guides/development-mode');
@@ -120,68 +74,102 @@ export default class HomeScreen extends React.Component {
     );
   };
 
-   async onPress()
+  _onPress = () =>
   {
-    axios.post("http:///localhost:3978/api/messages", this.state.text)
-    .then(res => console.log(res))
-    .catch(err => console.log(err))
-
-    this.socket.emit('text', this.state.text);
-    this.socket.on('response'); 
-    const { Permissions } = Expo;
-    const { status } = await Permissions.askAsync(Permissions.AUDIO_RECORDING);
-    if (status === 'granted')
+    if (this.state.isrec)
     {
-      Expo.Audio.setAudioModeAsync({
-        playsInSilentModeIOS : false,
-        allowsRecordingIOS: false,
-        interruptionModeIOS : Expo.Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX,
-        shouldDuckAndroid : true,
-        interruptionModeAndroid : Expo.Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
-        playThroughEarpieceAndroid : true
+      this._StopRecording();
+    }
+    else
+    {
+      this._BeginRecording();
+    }
+  }
+
+  _recordingController = status =>
+  {
+    if (status.canRecord) {
+      this.setState({
+        isrec: status.isRecording,
+        recordingDuration: status.durationMillis,
       });
+    } else if (status.isDoneRecording) {
+      this.setState({
+        isrec: false,
+        recordingDuration: status.durationMillis,
+      });
+      if (!this.state.isLoading) {
+        this._StopRecording();
+      }
+    }
+  }
+  
+  async _BeginRecording()
+  {
+    this.setState({
+      isloading : true,
+    })
+    
+    await Audio.setAudioModeAsync({
+      playsInSilentModeIOS : false,
+      allowsRecordingIOS: false,
+      interruptionModeIOS : Expo.Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX,
+      shouldDuckAndroid : true,
+      interruptionModeAndroid : Expo.Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
+      playThroughEarpieceAndroid : true
+    });
 
-      this.socket.emit('message', this.state.text);
+    if (this.recording !== null) {
+      this.recording.setOnRecordingStatusUpdate(null);
+      this.recording = null;
+    }
 
+    const record = new Audio.Recording();
+    await record.prepareToRecordAsync();
+    await record.setOnRecordingStatusUpdate(this._recordingController);
+    
+    this.recording = record;
+    await this.recording.startAsync();
 
-      const record = new Expo.Audio.Recording();
-      if(this.state.rec === false)
+    this.setState({
+      isloading : false,
+    })
+  }
+
+  async _StopRecording()
+  {
+    this.setState({
+      isloading : true,
+    })
+    
+    await this.recording.stopAndUnloadAsync();
+
+    const info = await FileSystem.getInfoAsync(this.recording.getURI());
+    console.log(`FILE INFO: ${JSON.stringify(info)}`);
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      interruptionModeIOS: Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX,
+      playsInSilentModeIOS: true,
+      playsInSilentLockedModeIOS: true,
+      shouldDuckAndroid: true,
+      interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
+    });
+
+    const { sound, status } = await this.recording.createNewLoadedSound(
       {
+        isLooping: true,
+        isMuted: false,
+        volume: 100,
+        rate: 1,
+        shouldCorrectPitch: true,
+      },
+      this._recordingController
+    );
+    this.sound = sound;
 
-        try {
-          await record.prepareToRecordAsync(Expo.Audio.RECORDING_OPTIONS_PRESET_HIGH_QUALITY);
-          await record.startAsync();
-
-        }
-         catch (e) {
-          console.log(e);
-        }
-      }
-      else {
-        try {
-          await record.stopAndUnloadAsync();
-        } catch (e) {
-          console.log(e);
-        } finally {
-          record.setOnRecordingStatusUpdate(null);
-        }
-
-        var fileurl = record.getURI();
-        try {
-           const { sound: soundObject, status } = await Expo.Audio.Sound.createAsync((fileurl), { shouldPlay : true});
-           await sound.playAsync();
-        } catch (e) {
-          console.log(e);
-        }
-      }
-    }
-    else {
-      console.log("Didn't have permission")
-    }
-    this.setState(prevState => ({
-      rec: !prevState.rec
-    }));
-
+    this.setState({
+      isloading : false,
+    })
   }
 }
 
